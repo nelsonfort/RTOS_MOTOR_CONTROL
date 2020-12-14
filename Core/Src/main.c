@@ -46,6 +46,7 @@ TIM_HandleTypeDef htim3;
 osThreadId Task1Handle;
 osThreadId Task2Handle;
 osThreadId TaskPWMHandle;
+osThreadId readMotorSpeedHandle;
 osSemaphoreId binSem1Handle;
 /* USER CODE BEGIN PV */
 
@@ -58,14 +59,18 @@ static void MX_TIM3_Init(void);
 void Task1_App(void const * argument);
 void Task2_App(void const * argument);
 void TaskPWM_App(void const * argument);
+void readMotorSpeed_App(void const * argument);
 
 /* USER CODE BEGIN PFP */
+void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint16_t pulse);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+volatile uint32_t contEncA = 0;
+volatile uint32_t contEncB = 0;
+float MotorA_speed = 0;
 /* USER CODE END 0 */
 
 /**
@@ -134,6 +139,10 @@ int main(void)
   /* definition and creation of TaskPWM */
   osThreadDef(TaskPWM, TaskPWM_App, osPriorityIdle, 0, 128);
   TaskPWMHandle = osThreadCreate(osThread(TaskPWM), NULL);
+
+  /* definition and creation of readMotorSpeed */
+  osThreadDef(readMotorSpeed, readMotorSpeed_App, osPriorityNormal, 0, 128);
+  readMotorSpeedHandle = osThreadCreate(osThread(readMotorSpeed), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -279,7 +288,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|MotorA_INA_Pin|MotorA_INB_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -295,14 +304,23 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
+  /*Configure GPIO pins : LD2_Pin MotorA_INA_Pin MotorA_INB_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin|MotorA_INA_Pin|MotorA_INB_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : MotorA_EncB_Pin MotorA_EncA_Pin */
+  GPIO_InitStruct.Pin = MotorA_EncB_Pin|MotorA_EncA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
@@ -315,6 +333,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	{
 		osSemaphoreRelease(binSem1Handle);
 
+	}
+	if(MotorA_EncA_Pin == GPIO_Pin)
+	{
+		contEncA++;
+	}
+	if(MotorA_EncB_Pin == GPIO_Pin)
+	{
+		contEncB++;
 	}
 }
 /* USER CODE END 4 */
@@ -373,18 +399,59 @@ void TaskPWM_App(void const * argument)
   /* USER CODE BEGIN TaskPWM_App */
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+	HAL_GPIO_WritePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin, GPIO_PIN_RESET);
   /* Infinite loop */
   for(;;)
   {
 	for(uint8_t cont = 1; cont <=4 ; cont++ ){
-		//set_PWM(htim3, TIM_CHANNEL_1, 3600, 900*cont);
-	}
 
-    osDelay(1000);
+		set_PWM(htim3, TIM_CHANNEL_1, 3600, 900*cont);
+		osDelay(2500);
+	}
+	HAL_GPIO_TogglePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin);
+	HAL_GPIO_TogglePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin);
+
+
+
   }
   /* USER CODE END TaskPWM_App */
 }
 
+/* USER CODE BEGIN Header_readMotorSpeed_App */
+/**
+* @brief Function implementing the readMotorSpeed thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_readMotorSpeed_App */
+void readMotorSpeed_App(void const * argument)
+{
+  /* USER CODE BEGIN readMotorSpeed_App */
+  /* Infinite loop */
+  for(;;)
+  {
+	osDelay(1000);
+	MotorA_speed = (contEncA + contEncB)/64;
+	contEncA = 0;
+	contEncB = 0;
+  }
+  /* USER CODE END readMotorSpeed_App */
+}
+void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint16_t pulse)
+{
+    HAL_TIM_PWM_Stop(&timer,channel);
+    TIM_OC_InitTypeDef sConfigOC;
+    timer.Init.Period = period;
+    HAL_TIM_PWM_Init(&timer);
+    sConfigOC.OCMode = TIM_OCMODE_PWM1;
+    sConfigOC.Pulse = pulse;
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+    HAL_TIM_PWM_ConfigChannel(&timer,&sConfigOC,channel);
+
+    HAL_TIM_PWM_Start(&timer,channel);
+}
 /**
   * @brief  Period elapsed callback in non blocking mode
   * @note   This function is called  when TIM6 interrupt took place, inside

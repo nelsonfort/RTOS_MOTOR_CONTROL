@@ -69,6 +69,16 @@ void Error_Handler(void);
 #define USART_RX_GPIO_Port GPIOA
 #define LD2_Pin GPIO_PIN_5
 #define LD2_GPIO_Port GPIOA
+#define MotorA_EncB_Pin GPIO_PIN_8
+#define MotorA_EncB_GPIO_Port GPIOA
+#define MotorA_EncB_EXTI_IRQn EXTI9_5_IRQn
+#define MotorA_EncA_Pin GPIO_PIN_9
+#define MotorA_EncA_GPIO_Port GPIOA
+#define MotorA_EncA_EXTI_IRQn EXTI9_5_IRQn
+#define MotorA_INA_Pin GPIO_PIN_11
+#define MotorA_INA_GPIO_Port GPIOA
+#define MotorA_INB_Pin GPIO_PIN_12
+#define MotorA_INB_GPIO_Port GPIOA
 #define TMS_Pin GPIO_PIN_13
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
