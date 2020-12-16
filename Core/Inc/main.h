@@ -37,7 +37,21 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+typedef struct InputCapture_Signals {
+	uint8_t Is_First_Captured;
+	uint32_t IC_Value1;
+	uint32_t IC_Value2;
+	uint32_t Period;
+	float	Frequency;
+	uint8_t CalculationOK;
+} IC_Sig_t;
+typedef struct UART_DATA_SEND {
+	uint32_t MotorA_speed;
+	uint32_t Period;
+	float	Frequency;
+	uint32_t time_stamp;
 
+} UART_DATA_SEND_t;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -69,12 +83,6 @@ void Error_Handler(void);
 #define USART_RX_GPIO_Port GPIOA
 #define LD2_Pin GPIO_PIN_5
 #define LD2_GPIO_Port GPIOA
-#define MotorA_EncB_Pin GPIO_PIN_8
-#define MotorA_EncB_GPIO_Port GPIOA
-#define MotorA_EncB_EXTI_IRQn EXTI9_5_IRQn
-#define MotorA_EncA_Pin GPIO_PIN_9
-#define MotorA_EncA_GPIO_Port GPIOA
-#define MotorA_EncA_EXTI_IRQn EXTI9_5_IRQn
 #define MotorA_INA_Pin GPIO_PIN_11
 #define MotorA_INA_GPIO_Port GPIOA
 #define MotorA_INB_Pin GPIO_PIN_12
@@ -86,7 +94,8 @@ void Error_Handler(void);
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
-
+#define ENCODER_SHAFT_CPR 600 //1200 pulses per rev, only used A period
+#define millis5 5
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

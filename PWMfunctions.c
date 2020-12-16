@@ -1,4 +1,16 @@
 
+//--- TIPOS DE DATOS Y DECLARACION DE VARS
+typedef struct InputCapture_Signals {
+	uint8_t Is_First_Captured;
+	uint32_t IC_Value1;
+	uint32_t IC_Value2;
+	uint32_t Difference;
+	float	Frequency;
+	uint8_t CalculationOK;
+} IC_Sig_t;
+
+
+//--- FUNCIONES
 void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint16_t pulse);
 
 
