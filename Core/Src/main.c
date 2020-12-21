@@ -162,7 +162,7 @@ int main(void)
   Task2Handle = osThreadCreate(osThread(Task2), NULL);
 
   /* definition and creation of TaskPWM */
-  osThreadDef(TaskPWM, TaskPWM_App, osPriorityIdle, 0, 128);
+  osThreadDef(TaskPWM, TaskPWM_App, osPriorityNormal, 0, 128);
   TaskPWMHandle = osThreadCreate(osThread(TaskPWM), NULL);
 
   /* definition and creation of readMotorSpeed */
@@ -260,7 +260,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
+  htim1.Init.Prescaler = 72;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -384,7 +384,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 38400;
+  huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -476,11 +476,12 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			{
 				MotorA_EncA.Period = MotorA_EncA.IC_Value2+65535 - MotorA_EncA.IC_Value1;
 			}
-			MotorA_EncA.Frequency = HAL_RCC_GetPCLK1Freq()/MotorA_EncA.Period;
-			MotorA_EncA.CalculationOK = 1;
+			//MotorA_EncA.Frequency = HAL_RCC_GetPCLK2Freq()/(htim->Init.Prescaler*MotorA_EncA.Period);
+			//MotorA_EncA.CalculationOK = 1;
 			MotorA_EncA.Is_First_Captured = 0;
 
 		}
+		MotorA_EncA.cont++;
 	}
 	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2)
 	{
@@ -500,11 +501,13 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			{
 				MotorA_EncB.Period = MotorA_EncB.IC_Value2+65535 - MotorA_EncB.IC_Value1;
 			}
-			MotorA_EncB.Frequency = HAL_RCC_GetPCLK1Freq()/MotorA_EncB.Period;
-			MotorA_EncB.CalculationOK = 1;
+			// Freq = (FreqCKL/(PreScaler*Nticks))
+			//MotorA_EncB.Frequency = HAL_RCC_GetPCLK2Freq()/(htim->Init.Prescaler*MotorA_EncB.Period);
+			//MotorA_EncB.CalculationOK = 1;
 			MotorA_EncB.Is_First_Captured = 0;
 
 		}
+		MotorA_EncB.cont++;
 	}
 }
 
@@ -578,11 +581,30 @@ void TaskPWM_App(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-	for(uint8_t cont = 1; cont <=4 ; cont++ ){
+	osDelay(1000);
+	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint16_t) 3600*0.6); // -- 60% PWM
+	osDelay(2000);
+	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint16_t) 0);
+	osDelay(1000);
+	/*for(uint8_t cont = 1; cont <=4 ; cont++ ){
 
 		set_PWM(htim3, TIM_CHANNEL_1, 3600, 900*cont);
 		osDelay(2500);
+	}*/
+	/*for(int8_t cont = 1; cont >=0 ; cont-- ){
+
+		set_PWM(htim3, TIM_CHANNEL_1, 3600, 3600*cont);
+		osDelay(3500);
+	}*/
+	// --------------- Perfil de aceleracion y desaceleración -------------
+	/*for(int8_t cont = 0; cont <=16 ; cont++ ){
+		set_PWM(htim3, TIM_CHANNEL_1, 3600, 225*cont);
+		osDelay(500);
 	}
+	for(int8_t cont = 16; cont >=0 ; cont-- ){
+		set_PWM(htim3, TIM_CHANNEL_1, 3600, 225*cont);
+		osDelay(500);
+	}*/
 	HAL_GPIO_TogglePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin);
 	HAL_GPIO_TogglePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin);
 
@@ -602,20 +624,34 @@ void TaskPWM_App(void const * argument)
 void readMotorSpeed_App(void const * argument)
 {
   /* USER CODE BEGIN readMotorSpeed_App */
-
+	uint8_t contAux = 0;
 	HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
 	HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
 	UART_DATA_SEND_t *dataPtr;
+
+
 
   /* Infinite loop */
   for(;;)
   {
 
 	//osMutexWait(MutexEncoderHandle, osWaitForever );
-	DataSendUart.MotorA_speed = (uint32_t) MotorA_EncA.Frequency/ENCODER_SHAFT_CPR;
-	DataSendUart.time_stamp = (uint32_t) tickCounter;
-	DataSendUart.Period = (uint32_t) MotorA_EncA.Period;
-	DataSendUart.Frequency = (float) MotorA_EncA.Frequency;
+	if(contAux == MotorA_EncA.cont)
+	{
+		DataSendUart.MotorA_speed = 0;
+		DataSendUart.time_stamp = (uint32_t) tickCounter;
+		DataSendUart.Period = 0;
+		DataSendUart.Frequency = 0;
+	}
+	else{
+		// Freq = (FreqCKL/(PreScaler*Nticks))
+		// Speed = Freq/Encoder_pulses (Speed in the shaft)
+		DataSendUart.MotorA_speed = (float) HAL_RCC_GetPCLK2Freq()/(htim1.Init.Prescaler*MotorA_EncB.Period*ENCODER_SHAFT_CPR);
+		DataSendUart.time_stamp = (uint32_t) tickCounter;
+		DataSendUart.Period = (uint32_t) MotorA_EncA.Period;
+		DataSendUart.Frequency = (float) MotorA_EncA.Frequency;
+	}
+
 	//osMutexRelease(MutexEncoderHandle);
 	//dataPtr = osMailAlloc(QueueUARTSndHandle, millis5);
 	dataPtr = osMailAlloc(QueueUARTSndHandle, osWaitForever );
@@ -628,7 +664,8 @@ void readMotorSpeed_App(void const * argument)
 			while(1);
 		}
 	}
-	osDelay(10);
+	contAux = MotorA_EncA.cont;
+	osDelay(1);
 
 	//osMessagePut(QueueUARTSendHandle, DataSendUart.MotorA_speed, millis5);
 	//osMessagePut(QueueUARTSendHandle, DataSendUart.time_stamp, millis5);
@@ -649,12 +686,17 @@ void uartSend_App(void const * argument)
   /* USER CODE BEGIN uartSend_App */
   osEvent dataSEND;
   UART_DATA_SEND_t *dataPtr;
+  uint8_t a=8, b=16, c=32, d=64 ;
   /* Infinite loop */
   for(;;)
   {
 	  dataSEND = osMailGet(QueueUARTSndHandle, osWaitForever);
 	  if(dataSEND.status == osEventMail){
 		  dataPtr = dataSEND.value.p;
+		  HAL_UART_Transmit(&huart2, (uint8_t *)&a, sizeof(uint8_t), osWaitForever);
+		  HAL_UART_Transmit(&huart2, (uint8_t *)&b, sizeof(uint8_t), osWaitForever);
+		  HAL_UART_Transmit(&huart2, (uint8_t *)&c, sizeof(uint8_t), osWaitForever);
+		  HAL_UART_Transmit(&huart2, (uint8_t *)&d, sizeof(uint8_t), osWaitForever);
 		  HAL_UART_Transmit(&huart2, (uint8_t *)dataPtr, sizeof(UART_DATA_SEND_t), osWaitForever);
 		  osMailFree(QueueUARTSndHandle, dataPtr); // Free a memory block from a mail.
 	  }

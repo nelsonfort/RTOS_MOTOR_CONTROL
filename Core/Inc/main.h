@@ -44,9 +44,10 @@ typedef struct InputCapture_Signals {
 	uint32_t Period;
 	float	Frequency;
 	uint8_t CalculationOK;
+	uint8_t cont;
 } IC_Sig_t;
 typedef struct UART_DATA_SEND {
-	uint32_t MotorA_speed;
+	float MotorA_speed;
 	uint32_t Period;
 	float	Frequency;
 	uint32_t time_stamp;
@@ -94,7 +95,7 @@ void Error_Handler(void);
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
-#define ENCODER_SHAFT_CPR 600 //1200 pulses per rev, only used A period
+#define ENCODER_SHAFT_CPR 304 //CPR*Reduccion/4 =64*19/4, only used A period (risingEdge A signal)
 #define millis5 5
 /* USER CODE END Private defines */
 
