@@ -470,6 +470,12 @@ void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint32_
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
+	//-- Al detectar un flanco ascendente se activa el presente Callback
+	//-- la dirección se obtiene al analizar en que estado está la otra señal
+	//-- con respecto a la señal que genera el flanco.
+	//-- Is_First_Captured se utiliza para determinar si se pudo obtener el primer
+	//-- pulso y asi obtener el segundo para luego estimar el periodo de la señal A
+	//-- luego obtener la velocidad del motor.
 	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1)
 	{
 		if(HAL_GPIO_ReadPin(PIN_DIR_GPIO_Port,PIN_DIR_Pin ) == 1)
@@ -497,15 +503,19 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			{
 				MotorA_EncA.Period = MotorA_EncA.IC_Value2+65535 - MotorA_EncA.IC_Value1;
 			}
-			//MotorA_EncA.Frequency = HAL_RCC_GetPCLK2Freq()/(htim->Init.Prescaler*MotorA_EncA.Period);
-			//MotorA_EncA.CalculationOK = 1;
+
 			MotorA_EncA.Is_First_Captured = 0;
 
 		}
+		//-- Este contador sirve para determinar cuando se detuvo el motor. Al no haber cambios
+		//-- en la velocidad y el contador sigue aumentando nos da un indicio de que el motor
+		//-- se detuvo y nos quedaron valores que no se corresponden con el estado del motor.
 		MotorA_EncA.cont++;
 	}
 	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2)
 	{
+		//-- Se calcula el período de la señal B del encoder pero actualmente no es utilizada
+		//-- para estimar la velocidad.
 		if(MotorA_EncB.Is_First_Captured==0)
 		{
 			MotorA_EncB.IC_Value1 = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
@@ -522,9 +532,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 			{
 				MotorA_EncB.Period = MotorA_EncB.IC_Value2+65535 - MotorA_EncB.IC_Value1;
 			}
-			// Freq = (FreqCKL/(PreScaler*Nticks))
-			//MotorA_EncB.Frequency = HAL_RCC_GetPCLK2Freq()/(htim->Init.Prescaler*MotorA_EncB.Period);
-			//MotorA_EncB.CalculationOK = 1;
+
 			MotorA_EncB.Is_First_Captured = 0;
 
 		}
@@ -537,6 +545,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if(B1_Pin == GPIO_Pin)
 	{
+		//-- La placa posee un pulsador que se puede utilizar para iniciar el
+		//-- arranque del motor. En este caso está configurado para que arranque
+		//-- por interrupción.
 		osSemaphoreRelease(binSem1Handle);
 
 	}
@@ -558,12 +569,17 @@ void TaskVelRef_App(void const * argument)
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
   for(;;)
   {
-	  if(!MC.ready)
+
+	  if(!MC.ready) //-- Espera al pulsador
 	  {
 		  osSemaphoreWait(binSem1Handle, osWaitForever);
 	  }
 	  MC.ready=1;
 	  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+
+	  //-- Perfil de velocidad utilizado para el análisis del sistema.
+	  //-- Cada 3 segundos cambia de 300rpm a 450rpm
+	  //-- Luego de 450rpm a 300 rpm y así sucesivamente.
 	  for(uint8_t cont = 0; cont <=3 ; cont++ )
 	  {
 		MC.speedRef = (300+cont*50);
@@ -574,7 +590,7 @@ void TaskVelRef_App(void const * argument)
 		MC.speedRef = (300+cont*50);
 		osDelay(3000);
 	  }
-	  //osDelay(1);
+
   }
   /* USER CODE END 5 */
 }
@@ -592,6 +608,8 @@ void TaskControl_App(void const * argument)
 	//-- Initialize structure
 	MC.MotorA_speed = 0;
 	MC.MotorB_speed = 0;
+
+	//-- Pongo todos los coeficientes del PID en 0
 	for(int8_t cont = 0;cont<PID_COEF_LEN;cont++)
 	{
 		MC.PID_MA.x_n[cont] = 0;
@@ -601,6 +619,8 @@ void TaskControl_App(void const * argument)
 	MC.errorA=0;
 	MC.errorB=0;
 	//-- Seteo los coeficientes del PID diseñado.
+
+	// *.*.*.*.*  Selección del PID *.*.*.*.*
 
 	//******* PID --> Para Ts 1ms  **************
 
@@ -631,7 +651,7 @@ void TaskControl_App(void const * argument)
 	MC.PID_MA.b[1] = 0.034*MC.PID_MA.K;
 	MC.PID_MA.b[2] = 0;*/
 
-
+	MC.Tsample = 5; //-- 5ms
 	osDelay(10);
 
   /* Infinite loop */
@@ -639,7 +659,7 @@ void TaskControl_App(void const * argument)
   {
 	  if(MC.ready)
 	  {
-		  osDelay(5);
+		  osDelay(MC.Tsample);
 		  //-- Armo la señal de error
 		  MC.errorA = MC.speedRef - MC.MotorA_speed*60;
 
@@ -658,6 +678,7 @@ void TaskControl_App(void const * argument)
 		  {
 			  MC.PID_MA.y_n[0] += MC.PID_MA.b[i]*MC.PID_MA.x_n[i] + MC.PID_MA.a[i]*MC.PID_MA.y_n[i];
 		  }
+		  //-- Esto se arma automaticamente con el algoritmo de arriba.
 		  /*MC.PID_MA.y_n[0] = MC.PID_MA.b[0]*MC.PID_MA.x_n[0] +
 				  	  	  	  MC.PID_MA.b[1]*MC.PID_MA.x_n[1] +
 							  MC.PID_MA.b[2]*MC.PID_MA.x_n[2] +
@@ -690,8 +711,10 @@ void TaskControl_App(void const * argument)
 void TaskPWM_App(void const * argument)
 {
   /* USER CODE BEGIN TaskPWM_App */
+	//-- Timers encargados de iniciar los modulos PWM del uC
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+	//-- Seteamos la dirección del motor y el PWM en 0 para dejarlo quieto.
 	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint16_t) 0); // -- PWM desactivado
 	HAL_GPIO_WritePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin, GPIO_PIN_RESET);
@@ -700,6 +723,7 @@ void TaskPWM_App(void const * argument)
   /* Infinite loop */
   for(;;)
   {
+	//-- Esperamos que se halla actualizado la ecuacion en diferencias.
 	osSemaphoreWait(BinSemPWMHandle, osWaitForever);
 	MC.pwmMotor = MC.PID_MA.y_n[0];
 	if(MC.pwmMotor<=0)
@@ -712,6 +736,9 @@ void TaskPWM_App(void const * argument)
 		HAL_GPIO_WritePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin, GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin, GPIO_PIN_SET);
 	}
+	//-- Seteamos el ancho del pulso del pwm que acciona al motor.
+	//-- tiene un factor de escala de 450 para indicar que el valor máximo seteable
+	//-- es de 450rpm.
 	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint32_t) fabs((3600*MC.pwmMotor/450)  ) ); ///7.5 --Vmax 450rpm PWM
 
   }
@@ -729,9 +756,13 @@ void TaskMotorSpeed_App(void const * argument)
 {
   /* USER CODE BEGIN TaskMotorSpeed_App */
 	uint8_t contAux = 0;
+	//-- Inicializo los timers encargados de generar las interrupciones
+	//-- para medir las señales A y B del encoder.
 	HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
 	HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
+	//-- Puntero utilizado para enviar datos por la cola de mensajes.
 	UART_DATA_SEND_t *dataPtr;
+
 	MotorA_EncA.direction = 1;
   /* Infinite loop */
   for(;;)
@@ -739,6 +770,8 @@ void TaskMotorSpeed_App(void const * argument)
 	  //osMutexWait(MutexEncoderHandle, osWaitForever );
 		if((contAux == MotorA_EncA.cont))
 		{
+			//-- Setea la velocidad "leida" del motor en 0 cuando
+			//-- no se detectan pulsos provenientes del encoder.
 			DataSendUart.MotorA_speed = 0;
 			MC.MotorA_speed = 0;
 			DataSendUart.time_stamp = (uint32_t) tickCounter;
@@ -746,25 +779,32 @@ void TaskMotorSpeed_App(void const * argument)
 			DataSendUart.Frequency = 0;
 		}
 		else{
-			// Freq = (FreqCLK/(PreScaler*Nticks))
-			// Speed = Freq/Encoder_pulses (Speed in the shaft)
+			//-- Primero se determina la frecuencia de la señal A del encoder.
+			//-- Luego se utiliza ésta con un factor de conversión pulsos en el eje de salida.
+			//-- Freq = (FreqCLK/(PreScaler*Nticks))
+			//-- Speed = Freq/Encoder_pulses (Speed in the shaft)
 			DataSendUart.MotorA_speed = (float) HAL_RCC_GetPCLK2Freq()/(htim1.Init.Prescaler*MotorA_EncA.Period*ENCODER_SHAFT_CPR);
-			//DataSendUart.MotorA_speed = DataSendUart.MotorA_speed;//*MotorA_EncA.direction;
 			MC.MotorA_speed = DataSendUart.MotorA_speed;
+
+			//-- Sirve para indicar en qué momento se obtuvo la medicion de velocidad
 			DataSendUart.time_stamp = (uint32_t) tickCounter;
+
 			DataSendUart.Period = (uint32_t) MotorA_EncA.Period;
 			DataSendUart.Frequency = (float) MotorA_EncA.Frequency;
 			contAux = MotorA_EncA.cont;
 		}
 
 		//osMutexRelease(MutexEncoderHandle);
-		//dataPtr = osMailAlloc(QueueUARTSndHandle, millis5);
+
+		//-- Asigno memoria din{amica para enviar el mensaje
 		dataPtr = osMailAlloc(QueueUARTSndHandle, osWaitForever );
 		if(dataPtr != NULL)
 		{
+			//-- Cargo el mensaje
 			dataPtr->MotorA_speed = DataSendUart.MotorA_speed;
 			dataPtr->time_stamp = DataSendUart.time_stamp;
 			dataPtr->reference = (float) MC.speedRef;
+			//-- Envio el mensaje por la cola
 			if(osMailPut(QueueUARTSndHandle, dataPtr) != osOK)
 			{
 				while(1);
@@ -787,6 +827,8 @@ void TaskUartSend_App(void const * argument)
   /* USER CODE BEGIN TaskUartSend_App */
   osEvent dataSEND;
   UART_DATA_SEND_t *dataPtr;
+
+  // -- Variables para sincronismo
   uint8_t a=8, b=16, c=32, d=64 ;
   /* Infinite loop */
   for(;;)
@@ -794,12 +836,17 @@ void TaskUartSend_App(void const * argument)
 	  dataSEND = osMailGet(QueueUARTSndHandle, osWaitForever);
 	  if(dataSEND.status == osEventMail){
 		  dataPtr = dataSEND.value.p;
+		  //-- Transmito 4 variables de 8 bits para sincronizar los datos por UART.
+		  //-- Esto toma importancia al momento de enviar tamaño de datos mayores a 1byte.
+		  //-- También sirve para determinar a qué variable corresponde cada valor enviado
+		  //-- Por el orden que poseen en la estructura implementada.
 		  HAL_UART_Transmit(&huart2, (uint8_t *)&a, sizeof(uint8_t), osWaitForever);
 		  HAL_UART_Transmit(&huart2, (uint8_t *)&b, sizeof(uint8_t), osWaitForever);
 		  HAL_UART_Transmit(&huart2, (uint8_t *)&c, sizeof(uint8_t), osWaitForever);
 		  HAL_UART_Transmit(&huart2, (uint8_t *)&d, sizeof(uint8_t), osWaitForever);
 		  HAL_UART_Transmit(&huart2, (uint8_t *)dataPtr, sizeof(UART_DATA_SEND_t), osWaitForever);
-		  osMailFree(QueueUARTSndHandle, dataPtr); // Free a memory block from a mail.
+		  //-- Libero la memoria del mensaje recibido por la cola que ya fue enviado por uart.
+		  osMailFree(QueueUARTSndHandle, dataPtr);
 	  }
   }
   /* USER CODE END TaskUartSend_App */
@@ -824,6 +871,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE BEGIN Callback 1 */
 
   //osMutexWait(MutexEncoderHandle, osWaitForever );
+  //-- Contador de ticks utilizado para obtener el timeStamp de las mediciones.
   tickCounter++;
   //osMutexRelease(MutexEncoderHandle);
   /* USER CODE END Callback 1 */

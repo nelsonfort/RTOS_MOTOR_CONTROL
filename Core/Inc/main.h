@@ -38,6 +38,10 @@ extern "C" {
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
 #define PID_COEF_LEN 3
+
+//-- Con esta estructura realizamos la lectura de frecuenacia de las señales A y B
+//-- que provee el encoder.
+
 typedef struct InputCapture_Signals {
 	uint8_t Is_First_Captured;
 	uint32_t IC_Value1;
@@ -48,6 +52,10 @@ typedef struct InputCapture_Signals {
 	uint8_t cont;
 	int8_t direction;
 } IC_Sig_t;
+
+//-- Estructura de datos para envio de datos por uart. para ser analizados luego
+//-- en la PC
+
 typedef struct UART_DATA_SEND {
 	float MotorA_speed;
 	uint32_t Period;
@@ -55,6 +63,10 @@ typedef struct UART_DATA_SEND {
 	uint32_t time_stamp;
 	float reference;
 } UART_DATA_SEND_t;
+
+//-- Estructura que contiene los coeficientes a y b y los datos actuales y pasados de
+//-- x e y.
+
 typedef struct PID_Controller{
 	float a[PID_COEF_LEN];
 	float b[PID_COEF_LEN];
@@ -62,16 +74,20 @@ typedef struct PID_Controller{
 	float x_n[PID_COEF_LEN];
 	float K; //-- Adjustable gain
 }PID_Cont_t;
+
+//-- Estructura que contiene variables pertinentes a lazo de control implementado.
+//-- En un futuro se tendrán dos motores controlados en paralelo.
 typedef struct MotorControl {
 	float speedRef;
 	float MotorA_speed;
-	float MotorB_speed;
+	float MotorB_speed; //-- TBD
 	float errorA;
-	float errorB;
+	float errorB;       //-- TBD
 	PID_Cont_t PID_MA;
-	PID_Cont_t PID_MB;
+	PID_Cont_t PID_MB;  //-- TBD
 	float pwmMotor;
 	uint8_t ready;
+	uint8_t Tsample; //-- en ms
 }Motor_Cont_t;
 /* USER CODE END ET */
 
