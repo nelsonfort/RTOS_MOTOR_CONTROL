@@ -37,6 +37,7 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+#define PID_COEF_LEN 3
 typedef struct InputCapture_Signals {
 	uint8_t Is_First_Captured;
 	uint32_t IC_Value1;
@@ -45,14 +46,31 @@ typedef struct InputCapture_Signals {
 	float	Frequency;
 	uint8_t CalculationOK;
 	uint8_t cont;
+	int8_t direction;
 } IC_Sig_t;
 typedef struct UART_DATA_SEND {
 	float MotorA_speed;
 	uint32_t Period;
 	float	Frequency;
 	uint32_t time_stamp;
-
 } UART_DATA_SEND_t;
+typedef struct PID_Controller{
+	float a[PID_COEF_LEN];
+	float b[PID_COEF_LEN];
+	float y_n[PID_COEF_LEN];
+	float x_n[PID_COEF_LEN];
+}PID_Cont_t;
+typedef struct MotorControl {
+	float speedRef;
+	float MotorA_speed;
+	float MotorB_speed;
+	float errorA;
+	float errorB;
+	PID_Cont_t PID_MA;
+	PID_Cont_t PID_MB;
+	float pwmMotor;
+	uint8_t ready;
+}Motor_Cont_t;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -78,6 +96,8 @@ void Error_Handler(void);
 #define B1_Pin GPIO_PIN_13
 #define B1_GPIO_Port GPIOC
 #define B1_EXTI_IRQn EXTI15_10_IRQn
+#define PIN_DIR_Pin GPIO_PIN_2
+#define PIN_DIR_GPIO_Port GPIOC
 #define USART_TX_Pin GPIO_PIN_2
 #define USART_TX_GPIO_Port GPIOA
 #define USART_RX_Pin GPIO_PIN_3

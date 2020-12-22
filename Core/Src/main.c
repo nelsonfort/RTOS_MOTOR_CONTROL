@@ -46,14 +46,15 @@ TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart2;
 
-osThreadId Task1Handle;
-osThreadId Task2Handle;
+osThreadId TaskVelRefHandle;
+osThreadId TaskControlHandle;
 osThreadId TaskPWMHandle;
-osThreadId readMotorSpeedHandle;
-osThreadId uartSendHandle;
+osThreadId TaskMotorSpeedHandle;
+osThreadId TaskUartSendHandle;
 osMessageQId QueueUARTSendHandle;
 osMutexId MutexEncoderHandle;
 osSemaphoreId binSem1Handle;
+osSemaphoreId BinSemPWMHandle;
 /* USER CODE BEGIN PV */
 osMailQDef(QueueUARTSnd, 32, UART_DATA_SEND_t);
 osMailQId QueueUARTSndHandle;
@@ -65,14 +66,14 @@ static void MX_GPIO_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_USART2_UART_Init(void);
-void Task1_App(void const * argument);
-void Task2_App(void const * argument);
+void TaskVelRef_App(void const * argument);
+void TaskControl_App(void const * argument);
 void TaskPWM_App(void const * argument);
-void readMotorSpeed_App(void const * argument);
-void uartSend_App(void const * argument);
+void TaskMotorSpeed_App(void const * argument);
+void TaskUartSend_App(void const * argument);
 
 /* USER CODE BEGIN PFP */
-void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint16_t pulse);
+void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint32_t pulse);
 
 /* USER CODE END PFP */
 
@@ -83,6 +84,7 @@ volatile IC_Sig_t MotorA_EncA;
 volatile IC_Sig_t MotorA_EncB;
 UART_DATA_SEND_t DataSendUart;
 volatile uint32_t tickCounter;
+volatile Motor_Cont_t MC; //-- Variable principal que aloja las estructuras utilizadas.
 /* USER CODE END 0 */
 
 /**
@@ -134,6 +136,10 @@ int main(void)
   osSemaphoreDef(binSem1);
   binSem1Handle = osSemaphoreCreate(osSemaphore(binSem1), 1);
 
+  /* definition and creation of BinSemPWM */
+  osSemaphoreDef(BinSemPWM);
+  BinSemPWMHandle = osSemaphoreCreate(osSemaphore(BinSemPWM), 1);
+
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
@@ -153,25 +159,25 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of Task1 */
-  osThreadDef(Task1, Task1_App, osPriorityNormal, 0, 128);
-  Task1Handle = osThreadCreate(osThread(Task1), NULL);
+  /* definition and creation of TaskVelRef */
+  osThreadDef(TaskVelRef, TaskVelRef_App, osPriorityHigh, 0, 128);
+  TaskVelRefHandle = osThreadCreate(osThread(TaskVelRef), NULL);
 
-  /* definition and creation of Task2 */
-  osThreadDef(Task2, Task2_App, osPriorityNormal, 0, 128);
-  Task2Handle = osThreadCreate(osThread(Task2), NULL);
+  /* definition and creation of TaskControl */
+  osThreadDef(TaskControl, TaskControl_App, osPriorityAboveNormal, 0, 128);
+  TaskControlHandle = osThreadCreate(osThread(TaskControl), NULL);
 
   /* definition and creation of TaskPWM */
-  osThreadDef(TaskPWM, TaskPWM_App, osPriorityNormal, 0, 128);
+  osThreadDef(TaskPWM, TaskPWM_App, osPriorityAboveNormal, 0, 128);
   TaskPWMHandle = osThreadCreate(osThread(TaskPWM), NULL);
 
-  /* definition and creation of readMotorSpeed */
-  osThreadDef(readMotorSpeed, readMotorSpeed_App, osPriorityNormal, 0, 128);
-  readMotorSpeedHandle = osThreadCreate(osThread(readMotorSpeed), NULL);
+  /* definition and creation of TaskMotorSpeed */
+  osThreadDef(TaskMotorSpeed, TaskMotorSpeed_App, osPriorityHigh, 0, 128);
+  TaskMotorSpeedHandle = osThreadCreate(osThread(TaskMotorSpeed), NULL);
 
-  /* definition and creation of uartSend */
-  osThreadDef(uartSend, uartSend_App, osPriorityNormal, 0, 128);
-  uartSendHandle = osThreadCreate(osThread(uartSend), NULL);
+  /* definition and creation of TaskUartSend */
+  osThreadDef(TaskUartSend, TaskUartSend_App, osPriorityBelowNormal, 0, 128);
+  TaskUartSendHandle = osThreadCreate(osThread(TaskUartSend), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -427,6 +433,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PIN_DIR_Pin */
+  GPIO_InitStruct.Pin = PIN_DIR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(PIN_DIR_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pins : LD2_Pin MotorA_INA_Pin MotorA_INB_Pin */
   GPIO_InitStruct.Pin = LD2_Pin|MotorA_INA_Pin|MotorA_INB_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -441,7 +453,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint16_t pulse)
+void set_PWM(TIM_HandleTypeDef timer, uint32_t channel, uint16_t period, uint32_t pulse)
 {
     HAL_TIM_PWM_Stop(&timer,channel);
     TIM_OC_InitTypeDef sConfigOC;
@@ -460,6 +472,15 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
 	if(htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1)
 	{
+		if(HAL_GPIO_ReadPin(PIN_DIR_GPIO_Port,PIN_DIR_Pin ) == 1)
+		{
+			MotorA_EncA.direction = -1;
+		}
+		else
+		{
+			MotorA_EncA.direction = 1;
+		}
+
 		if(MotorA_EncA.Is_First_Captured==0)
 		{
 			MotorA_EncA.IC_Value1 = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
@@ -522,46 +543,102 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 }
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_Task1_App */
+/* USER CODE BEGIN Header_TaskVelRef_App */
 /**
-  * @brief  Function implementing the Task1 thread.
+  * @brief  Function implementing the TaskVelRef thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_Task1_App */
-void Task1_App(void const * argument)
+/* USER CODE END Header_TaskVelRef_App */
+void TaskVelRef_App(void const * argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
+  MC.ready = 1;
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
   for(;;)
   {
-
-	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-	osSemaphoreWait(binSem1Handle, osWaitForever);
-	//osDelay(1000);
-    //osSemaphoreRelease(binSem1Handle);
+	  if(!MC.ready)
+	  {
+		  osSemaphoreWait(binSem1Handle, osWaitForever);
+	  }
+	  MC.ready=1;
+	  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+	  for(uint8_t cont = 0; cont <=2 ; cont++ ){
+		MC.speedRef = (250+cont*100);
+		osDelay(2500);
+	 }
+	  //osDelay(1);
   }
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_Task2_App */
+/* USER CODE BEGIN Header_TaskControl_App */
 /**
-* @brief Function implementing the Task2 thread.
+* @brief Function implementing the TaskControl thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_Task2_App */
-void Task2_App(void const * argument)
+/* USER CODE END Header_TaskControl_App */
+void TaskControl_App(void const * argument)
 {
-  /* USER CODE BEGIN Task2_App */
+  /* USER CODE BEGIN TaskControl_App */
+	//-- Initialize structure
+	MC.MotorA_speed = 0;
+	MC.MotorB_speed = 0;
+	for(int8_t cont = 0;cont<PID_COEF_LEN;cont++)
+	{
+		MC.PID_MA.x_n[cont] = 0;
+		MC.PID_MA.y_n[cont] = 0;
+	}
+	MC.speedRef=0;
+	MC.errorA=0;
+	MC.errorB=0;
+	//-- Seteo los coeficientes del PID diseñado.
+	MC.PID_MA.a[0] = 1;
+	MC.PID_MA.a[1] = 1.845;
+	MC.PID_MA.a[2] = -0.845;
+	MC.PID_MA.b[0] = 0.125;
+	MC.PID_MA.b[1] = 0.0075;
+	MC.PID_MA.b[2] = -0.117;
+
+	osDelay(10);
+
   /* Infinite loop */
   for(;;)
   {
-	  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-	  osDelay(1300);
+	  if(MC.ready)
+	  {
+		  osDelay(5);
+		  //-- Armo la señal de error
+		  MC.errorA = MC.speedRef - MC.MotorA_speed*60;
 
+		  //-- Realizo el corrimiento de los coeficientes del PID
+		  for(int8_t i = PID_COEF_LEN-2 ; i>=0 ; i--)
+		  {
+			  MC.PID_MA.x_n[i+1] = MC.PID_MA.x_n[i];
+			  MC.PID_MA.y_n[i+1] = MC.PID_MA.y_n[i];
+		  }
+		  MC.PID_MA.x_n[0] = MC.errorA;
+		  /*MC.PID_MA.y_n[0] = 0;
+		  MC.PID_MA.y_n[0] += MC.PID_MA.b[0]*MC.PID_MA.x_n[0] ;
+		  for(uint8_t i = 1 ; i<=PID_COEF_LEN-1 ; i++)
+		  {
+			  MC.PID_MA.y_n[0] += MC.PID_MA.b[i]*MC.PID_MA.x_n[i] + MC.PID_MA.a[i]*MC.PID_MA.y_n[i];
+		  }*/
+		  MC.PID_MA.y_n[0] = MC.PID_MA.b[0]*MC.PID_MA.x_n[0] +
+				  	  	  	  MC.PID_MA.b[1]*MC.PID_MA.x_n[1] +
+							  MC.PID_MA.b[2]*MC.PID_MA.x_n[2] +
+							  MC.PID_MA.a[1]*MC.PID_MA.y_n[1] +
+							  MC.PID_MA.a[2]*MC.PID_MA.y_n[2];
+
+		  //-- Libero la tarea encargada de activar el PWM que acciona el motor..
+		  osSemaphoreRelease(BinSemPWMHandle);
+
+	  }
+	  osDelay(1);
   }
-  /* USER CODE END Task2_App */
+  /* USER CODE END TaskControl_App */
 }
 
 /* USER CODE BEGIN Header_TaskPWM_App */
@@ -576,114 +653,98 @@ void TaskPWM_App(void const * argument)
   /* USER CODE BEGIN TaskPWM_App */
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint16_t) 0); // -- PWM desactivado
 	HAL_GPIO_WritePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin, GPIO_PIN_RESET);
+	MC.pwmMotor = 0;
+
   /* Infinite loop */
   for(;;)
   {
-	osDelay(1000);
-	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint16_t) 3600*0.6); // -- 60% PWM
-	osDelay(2000);
-	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint16_t) 0);
-	osDelay(1000);
-	/*for(uint8_t cont = 1; cont <=4 ; cont++ ){
-
-		set_PWM(htim3, TIM_CHANNEL_1, 3600, 900*cont);
-		osDelay(2500);
-	}*/
-	/*for(int8_t cont = 1; cont >=0 ; cont-- ){
-
-		set_PWM(htim3, TIM_CHANNEL_1, 3600, 3600*cont);
-		osDelay(3500);
-	}*/
-	// --------------- Perfil de aceleracion y desaceleración -------------
-	/*for(int8_t cont = 0; cont <=16 ; cont++ ){
-		set_PWM(htim3, TIM_CHANNEL_1, 3600, 225*cont);
-		osDelay(500);
+	osSemaphoreWait(BinSemPWMHandle, osWaitForever);
+	MC.pwmMotor = MC.PID_MA.y_n[0];
+	if(MC.pwmMotor<=0)
+	{
+		HAL_GPIO_WritePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin, GPIO_PIN_RESET);
 	}
-	for(int8_t cont = 16; cont >=0 ; cont-- ){
-		set_PWM(htim3, TIM_CHANNEL_1, 3600, 225*cont);
-		osDelay(500);
-	}*/
-	HAL_GPIO_TogglePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin);
-	HAL_GPIO_TogglePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin);
-
-
+	else
+	{
+		HAL_GPIO_WritePin(MotorA_INA_GPIO_Port, MotorA_INA_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(MotorA_INB_GPIO_Port, MotorA_INB_Pin, GPIO_PIN_SET);
+	}
+	set_PWM(htim3, TIM_CHANNEL_1, 3600, (uint32_t) fabs((3600*MC.pwmMotor/450)  ) ); ///7.5 --Vmax 450rpm PWM
 
   }
   /* USER CODE END TaskPWM_App */
 }
 
-/* USER CODE BEGIN Header_readMotorSpeed_App */
+/* USER CODE BEGIN Header_TaskMotorSpeed_App */
 /**
-* @brief Function implementing the readMotorSpeed thread.
+* @brief Function implementing the TaskMotorSpeed thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_readMotorSpeed_App */
-void readMotorSpeed_App(void const * argument)
+/* USER CODE END Header_TaskMotorSpeed_App */
+void TaskMotorSpeed_App(void const * argument)
 {
-  /* USER CODE BEGIN readMotorSpeed_App */
+  /* USER CODE BEGIN TaskMotorSpeed_App */
 	uint8_t contAux = 0;
 	HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
 	HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_2);
 	UART_DATA_SEND_t *dataPtr;
-
-
-
+	MotorA_EncA.direction = 1;
   /* Infinite loop */
   for(;;)
   {
-
-	//osMutexWait(MutexEncoderHandle, osWaitForever );
-	if(contAux == MotorA_EncA.cont)
-	{
-		DataSendUart.MotorA_speed = 0;
-		DataSendUart.time_stamp = (uint32_t) tickCounter;
-		DataSendUart.Period = 0;
-		DataSendUart.Frequency = 0;
-	}
-	else{
-		// Freq = (FreqCKL/(PreScaler*Nticks))
-		// Speed = Freq/Encoder_pulses (Speed in the shaft)
-		DataSendUart.MotorA_speed = (float) HAL_RCC_GetPCLK2Freq()/(htim1.Init.Prescaler*MotorA_EncB.Period*ENCODER_SHAFT_CPR);
-		DataSendUart.time_stamp = (uint32_t) tickCounter;
-		DataSendUart.Period = (uint32_t) MotorA_EncA.Period;
-		DataSendUart.Frequency = (float) MotorA_EncA.Frequency;
-	}
-
-	//osMutexRelease(MutexEncoderHandle);
-	//dataPtr = osMailAlloc(QueueUARTSndHandle, millis5);
-	dataPtr = osMailAlloc(QueueUARTSndHandle, osWaitForever );
-	if(dataPtr != NULL)
-	{
-		dataPtr->MotorA_speed = DataSendUart.MotorA_speed;
-		dataPtr->time_stamp = DataSendUart.time_stamp;
-		if(osMailPut(QueueUARTSndHandle, dataPtr) != osOK)
+	  //osMutexWait(MutexEncoderHandle, osWaitForever );
+		if((contAux == MotorA_EncA.cont))
 		{
-			while(1);
+			DataSendUart.MotorA_speed = 0;
+			MC.MotorA_speed = 0;
+			DataSendUart.time_stamp = (uint32_t) tickCounter;
+			DataSendUart.Period = 0;
+			DataSendUart.Frequency = 0;
 		}
-	}
-	contAux = MotorA_EncA.cont;
-	osDelay(1);
+		else{
+			// Freq = (FreqCLK/(PreScaler*Nticks))
+			// Speed = Freq/Encoder_pulses (Speed in the shaft)
+			DataSendUart.MotorA_speed = (float) HAL_RCC_GetPCLK2Freq()/(htim1.Init.Prescaler*MotorA_EncA.Period*ENCODER_SHAFT_CPR);
+			//DataSendUart.MotorA_speed = DataSendUart.MotorA_speed;//*MotorA_EncA.direction;
+			MC.MotorA_speed = DataSendUart.MotorA_speed;
+			DataSendUart.time_stamp = (uint32_t) tickCounter;
+			DataSendUart.Period = (uint32_t) MotorA_EncA.Period;
+			DataSendUart.Frequency = (float) MotorA_EncA.Frequency;
+			contAux = MotorA_EncA.cont;
+		}
 
-	//osMessagePut(QueueUARTSendHandle, DataSendUart.MotorA_speed, millis5);
-	//osMessagePut(QueueUARTSendHandle, DataSendUart.time_stamp, millis5);
-
+		//osMutexRelease(MutexEncoderHandle);
+		//dataPtr = osMailAlloc(QueueUARTSndHandle, millis5);
+		dataPtr = osMailAlloc(QueueUARTSndHandle, osWaitForever );
+		if(dataPtr != NULL)
+		{
+			dataPtr->MotorA_speed = DataSendUart.MotorA_speed;
+			dataPtr->time_stamp = DataSendUart.time_stamp;
+			if(osMailPut(QueueUARTSndHandle, dataPtr) != osOK)
+			{
+				while(1);
+			}
+		}
+		osDelay(1);
   }
-  /* USER CODE END readMotorSpeed_App */
+  /* USER CODE END TaskMotorSpeed_App */
 }
 
-/* USER CODE BEGIN Header_uartSend_App */
+/* USER CODE BEGIN Header_TaskUartSend_App */
 /**
-* @brief Function implementing the uartSend thread.
+* @brief Function implementing the TaskUartSend thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_uartSend_App */
-void uartSend_App(void const * argument)
+/* USER CODE END Header_TaskUartSend_App */
+void TaskUartSend_App(void const * argument)
 {
-  /* USER CODE BEGIN uartSend_App */
+  /* USER CODE BEGIN TaskUartSend_App */
   osEvent dataSEND;
   UART_DATA_SEND_t *dataPtr;
   uint8_t a=8, b=16, c=32, d=64 ;
@@ -700,10 +761,8 @@ void uartSend_App(void const * argument)
 		  HAL_UART_Transmit(&huart2, (uint8_t *)dataPtr, sizeof(UART_DATA_SEND_t), osWaitForever);
 		  osMailFree(QueueUARTSndHandle, dataPtr); // Free a memory block from a mail.
 	  }
-
   }
-
-  /* USER CODE END uartSend_App */
+  /* USER CODE END TaskUartSend_App */
 }
 
 /**
