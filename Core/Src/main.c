@@ -601,21 +601,37 @@ void TaskControl_App(void const * argument)
 	MC.errorA=0;
 	MC.errorB=0;
 	//-- Seteo los coeficientes del PID diseñado.
-	//-- Para Ts 1ms
+
+	//******* PID --> Para Ts 1ms  **************
+
 	//MC.PID_MA.a[0] = 1;
 	//MC.PID_MA.a[1] = 1.845;
 	//MC.PID_MA.a[2] = -0.845;
 	//MC.PID_MA.b[0] = 0.125;
 	//MC.PID_MA.b[1] = 0.0075;
 	//MC.PID_MA.b[2] = -0.117;
-	//-- Para Ts 5ms
-	MC.PID_MA.K = 0.5;
+
+	//******* PID --> Para Ts 5ms  **************
+
+	MC.PID_MA.K = 0.7;
 	MC.PID_MA.a[0] = 1;
 	MC.PID_MA.a[1] = 1.296;
 	MC.PID_MA.a[2] = -0.296;
 	MC.PID_MA.b[0] = 0.599*MC.PID_MA.K;
 	MC.PID_MA.b[1] = 0.1553*MC.PID_MA.K;
 	MC.PID_MA.b[2] = -0.444*MC.PID_MA.K;
+
+	//******* PI --> Para Ts 5ms  **************
+
+	/*MC.PID_MA.K = 20;
+	MC.PID_MA.a[0] = 1;
+	MC.PID_MA.a[1] = 1;
+	MC.PID_MA.a[2] = 0;
+	MC.PID_MA.b[0] = 0.6277*MC.PID_MA.K;
+	MC.PID_MA.b[1] = 0.034*MC.PID_MA.K;
+	MC.PID_MA.b[2] = 0;*/
+
+
 	osDelay(10);
 
   /* Infinite loop */
@@ -627,6 +643,8 @@ void TaskControl_App(void const * argument)
 		  //-- Armo la señal de error
 		  MC.errorA = MC.speedRef - MC.MotorA_speed*60;
 
+		  //*********************        Utilizando PID       *****************************************
+		  //*******************************************************************************************
 		  //-- Realizo el corrimiento de los coeficientes del PID
 		  for(int8_t i = PID_COEF_LEN-2 ; i>=0 ; i--)
 		  {
@@ -634,18 +652,25 @@ void TaskControl_App(void const * argument)
 			  MC.PID_MA.y_n[i+1] = MC.PID_MA.y_n[i];
 		  }
 		  MC.PID_MA.x_n[0] = MC.errorA;
-		  /*MC.PID_MA.y_n[0] = 0;
+		  MC.PID_MA.y_n[0] = 0;
 		  MC.PID_MA.y_n[0] += MC.PID_MA.b[0]*MC.PID_MA.x_n[0] ;
 		  for(uint8_t i = 1 ; i<=PID_COEF_LEN-1 ; i++)
 		  {
 			  MC.PID_MA.y_n[0] += MC.PID_MA.b[i]*MC.PID_MA.x_n[i] + MC.PID_MA.a[i]*MC.PID_MA.y_n[i];
-		  }*/
-		  MC.PID_MA.y_n[0] = MC.PID_MA.b[0]*MC.PID_MA.x_n[0] +
+		  }
+		  /*MC.PID_MA.y_n[0] = MC.PID_MA.b[0]*MC.PID_MA.x_n[0] +
 				  	  	  	  MC.PID_MA.b[1]*MC.PID_MA.x_n[1] +
 							  MC.PID_MA.b[2]*MC.PID_MA.x_n[2] +
 							  MC.PID_MA.a[1]*MC.PID_MA.y_n[1] +
-							  MC.PID_MA.a[2]*MC.PID_MA.y_n[2];
+							  MC.PID_MA.a[2]*MC.PID_MA.y_n[2];*/
+		  //*******************************************************************************************
 
+
+		  //*********************         Sin usar PID        *****************************************
+		  //*******************************************************************************************
+		  //MC.PID_MA.y_n[0] = MC.errorA;
+
+		  //*******************************************************************************************
 		  //-- Libero la tarea encargada de activar el PWM que acciona el motor..
 		  osSemaphoreRelease(BinSemPWMHandle);
 
