@@ -564,10 +564,16 @@ void TaskVelRef_App(void const * argument)
 	  }
 	  MC.ready=1;
 	  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-	  for(uint8_t cont = 0; cont <=2 ; cont++ ){
-		MC.speedRef = (250+cont*100);
-		osDelay(2500);
-	 }
+	  for(uint8_t cont = 0; cont <=3 ; cont++ )
+	  {
+		MC.speedRef = (300+cont*50);
+		osDelay(3000);
+	  }
+	  for(int8_t cont = 2; cont >=1 ; cont-- )
+	  {
+		MC.speedRef = (300+cont*50);
+		osDelay(3000);
+	  }
 	  //osDelay(1);
   }
   /* USER CODE END 5 */
@@ -595,13 +601,21 @@ void TaskControl_App(void const * argument)
 	MC.errorA=0;
 	MC.errorB=0;
 	//-- Seteo los coeficientes del PID diseñado.
+	//-- Para Ts 1ms
+	//MC.PID_MA.a[0] = 1;
+	//MC.PID_MA.a[1] = 1.845;
+	//MC.PID_MA.a[2] = -0.845;
+	//MC.PID_MA.b[0] = 0.125;
+	//MC.PID_MA.b[1] = 0.0075;
+	//MC.PID_MA.b[2] = -0.117;
+	//-- Para Ts 5ms
+	MC.PID_MA.K = 0.5;
 	MC.PID_MA.a[0] = 1;
-	MC.PID_MA.a[1] = 1.845;
-	MC.PID_MA.a[2] = -0.845;
-	MC.PID_MA.b[0] = 0.125;
-	MC.PID_MA.b[1] = 0.0075;
-	MC.PID_MA.b[2] = -0.117;
-
+	MC.PID_MA.a[1] = 1.296;
+	MC.PID_MA.a[2] = -0.296;
+	MC.PID_MA.b[0] = 0.599*MC.PID_MA.K;
+	MC.PID_MA.b[1] = 0.1553*MC.PID_MA.K;
+	MC.PID_MA.b[2] = -0.444*MC.PID_MA.K;
 	osDelay(10);
 
   /* Infinite loop */
@@ -725,6 +739,7 @@ void TaskMotorSpeed_App(void const * argument)
 		{
 			dataPtr->MotorA_speed = DataSendUart.MotorA_speed;
 			dataPtr->time_stamp = DataSendUart.time_stamp;
+			dataPtr->reference = (float) MC.speedRef;
 			if(osMailPut(QueueUARTSndHandle, dataPtr) != osOK)
 			{
 				while(1);

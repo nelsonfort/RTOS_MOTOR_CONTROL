@@ -53,12 +53,14 @@ typedef struct UART_DATA_SEND {
 	uint32_t Period;
 	float	Frequency;
 	uint32_t time_stamp;
+	float reference;
 } UART_DATA_SEND_t;
 typedef struct PID_Controller{
 	float a[PID_COEF_LEN];
 	float b[PID_COEF_LEN];
 	float y_n[PID_COEF_LEN];
 	float x_n[PID_COEF_LEN];
+	float K; //-- Adjustable gain
 }PID_Cont_t;
 typedef struct MotorControl {
 	float speedRef;
